@@ -15,13 +15,14 @@ app = FastAPI(
 
 # AVVIO DEL SISTEMA
 # Carico il database e il motore di redazione appena l'app parte.
-print("System Startup...")
-try:
-    vector_store = PolicyVectorStore()
-    redaction_engine = RedactionEngine(vector_store)
-    print("System Ready")
-except Exception as e:
-    print(f"Error during startup: {e}")
+print("Avvio del sistema in corso...")
+
+# Inizializzazione senza try/except per vedere subito eventuali errori
+vector_store = PolicyVectorStore()
+redaction_engine = RedactionEngine(vector_store)
+
+print("Sistema pronto. Database caricato correttamente.")
+
     
 # Definisce i modelli di input/output per validazione automatica
 class EntityItem(BaseModel):

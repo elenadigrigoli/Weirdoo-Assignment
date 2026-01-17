@@ -48,7 +48,7 @@ class RedactionEngine:
     def _derive_action_from_text(self, policy_text: str, entity_type: str) -> str:
         """
         Simula il componente 'Reasoning' di un LLM.
-        Analizza il testo della policy recuperata per decidere quale funzione eseguire basandosi su keyworks e gestione delle eccezioni.
+        Analizza il testo della policy recuperata per decidere quale funzione eseguire basandosi su keywords e gestione delle eccezioni.
         """
         text_normalized = policy_text.upper()
 

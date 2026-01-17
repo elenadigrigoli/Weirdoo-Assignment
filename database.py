@@ -1,7 +1,6 @@
 import chromadb
 from chromadb.utils import embedding_functions
 
-
 # Uso 'all-MiniLM-L6-v2' 
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 COLLECTION_NAME = "pii_redaction_policies"
@@ -14,8 +13,7 @@ class PolicyVectorStore:
 
     def __init__(self):
         # Inizializzo il client ChromaDB in memoria 
-        
-        print(f" Inizializzazione Vector Store con modello: {EMBEDDING_MODEL_NAME}...")
+        print(f"Inizializzazione Vector Store con modello: {EMBEDDING_MODEL_NAME}...")
         self.client = chromadb.Client()
         
         # Imposto la funzione di embedding che trasforma il testo in vettori numerici
@@ -34,21 +32,22 @@ class PolicyVectorStore:
 
     def _seed_knowledge_base(self):
         """
-        Carica il database con le regole hardcoded richieste .
+        Carica il database con le regole hardcoded richieste.
         """
         
-        # Definisco i il testo della policy
+        # Definisco il testo della policy
+        # NOTA: Le stringhe qui sotto DEVONO essere testo attivo, non commenti.
         policy_documents = [
-            # POLICY GLOBALE (Fallback) 
-            # Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo REDACT.
+            # POLICY GLOBALE (Fallback)
+            "Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo: REDACT.",
             
-            # POLICY CLIENTE: ACME 
-            # Le EMAIL devono essere convertite usando HASH;
-            # I numeri di PHONE devono essere parzialmente oscurati usando MASK_LAST_4; 
-            # I NAME (nomi propri) sono considerati pubblici, quindi KEEP.
+            # POLICY CLIENTE: ACME
+            "Le EMAIL devono essere convertite usando HASH per permettere analisi anonime.",
+            "I numeri di PHONE devono essere parzialmente oscurati usando MASK_LAST_4 per verifica operatore.",
+            "I NAME (nomi propri) sono considerati pubblici nel nostro caso, quindi KEEP.",
             
-            # POLICY CLIENTE: BETA 
-            # Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP.
+            # POLICY CLIENTE: BETA
+            "Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti."
         ]
 
         # Metadati associati per il filtering durante la ricerca
