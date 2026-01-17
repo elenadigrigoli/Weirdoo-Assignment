@@ -48,17 +48,20 @@ class RedactionEngine:
     def _derive_action_from_text(self, policy_text: str, entity_type: str) -> str:
         """
         Simula il componente 'Reasoning' di un LLM.
-        Analizza il testo della policy recuperata per decidere quale funzione eseguire basandosi su keywords e gestione delle eccezioni.
         """
         text_normalized = policy_text.upper()
+        # Normalizziamo anche l'input 
+        entity_upper = entity_type.upper()
 
-        # Controlla Eccezioni: gestisce frasi complesse come "Tutto REDACT eccetto i PHONE..."
-        # Se troviamo la parola 'ECCETTO' e il tipo di entità nella stessa frase, assumiamo che sia un'eccezione positiva (KEEP).
-        if "ECCETTO" in text_normalized and entity_type in text_normalized:
-            return "KEEP"
+        # Se c'è un'eccezione esplicita nel testo ("...eccetto i PHONE...")
+        if "ECCETTO" in text_normalized:
+            if entity_upper in text_normalized:
+                # eccezione (es. PHONE) -> KEEP
+                return "KEEP"
+            else:
+                return "REDACT"
 
-        # Mapping diretto delle Keyword
-        # Ordine di priorità: HASH > MASK > KEEP > REDACT
+        # Mapping diretto delle Keyword ( non c'è "ECCETTO")
         if "HASH" in text_normalized:
             return "HASH"
         
@@ -68,7 +71,6 @@ class RedactionEngine:
         if "KEEP" in text_normalized or "PUBBLICI" in text_normalized:
             return "KEEP"
 
-        # Se la regola cita "REDACT" o se non capiamo l'istruzione, oscuriamo tutto.
         return "REDACT"
 
     # PUBLIC API 
