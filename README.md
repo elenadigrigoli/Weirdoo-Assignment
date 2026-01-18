@@ -123,14 +123,14 @@ Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, E
 #### Request (Input)
 ```json
 {
-"customer_id": "ACME",
-"policy_version": "v2",
-"content": {
-"text": "L'utente Mario Rossi (mario@acme.com) ha chiamato il 333-123456.",
-"entities": [
-{ "type": "NAME", "value": "Mario Rossi", "start": 9, "end": 20 },
-{ "type": "EMAIL", "value": "mario@acme.com", "start": 22, "end": 36 },
-{ "type": "PHONE", "value": "333-123456", "start": 53, "end": 63 }
+  "customer_id": "ACME",
+  "policy_version": "v2",
+  "content": {
+       "text": "L'utente Mario Rossi (mario@acme.com) ha chiamato il 333-123456.",
+       "entities": [
+         { "type": "NAME", "value": "Mario Rossi", "start": 9, "end": 20 },
+         { "type": "EMAIL", "value": "mario@acme.com", "start": 22, "end": 36 },
+         { "type": "PHONE", "value": "333-123456", "start": 53, "end": 63 }
     ]
   }
 }
