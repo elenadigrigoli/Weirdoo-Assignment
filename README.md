@@ -5,27 +5,6 @@ E' un microservizio HTTP progettato per disaccoppiare la logica di business dall
 
 Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale. Recupera dinamicamente le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
 
-### 1.1 ChromaDB & Sentence Transformers
-Per soddisfare il requisito di esecuzione locale senza dipendenze da API esterne (OpenAI/Anthropic), ho implementato uno stack RAG leggero:
-
-* **Vector Store: ChromaDB**
-  * ChromaDB in modalità *in-memory/local*; non richiede container Docker pesanti per girare; permette di avere un DB vettoriale performante installando una semplice libreria Python.
-* **Embedding Model: `all-MiniLM-L6-v2`**
-  * Le policy di privacy sono frasi brevi e tecniche: `MiniLM-L6` è estremamente veloce su CPU, occupa poca RAM e offre una buona accuratezza semantica.
-
-### 1.2 Strategy Pattern per l'Esecuzione
-Nel file `logic.py`, ho usato il **Design Pattern Strategy**.
-* Ho creato una mappa (`Dict[str, Callable]`) che collega le keyword delle policy (es. `"HASH"`, `"MASK_LAST_4"`) direttamente alle funzioni Python.
-* Rispetta l'**Open-Closed Principle**: se si richiede una nuova cifratura basterà aggiungere una funzione e una riga nel dizionario, senza toccare la logica di retrieval o l'API.
-
-### 1.3 Algoritmo di Ricostruzione del Testo
-Per applicare le modifiche al testo originale, il sistema utilizza una ricostruzione posizionale basata sugli indici delle entità, applicando le sostituzioni in ordine inverso per preservare la validità delle coordinate.
-
-### 1.4 Semantic Layer & Determinismo
-Il sistema non si affida all'AI generativa, ma utilizza un layer semantico deterministico:
-* Il `Retrieval` individua la regola più pertinente.
-* Il codice analizza il testo della policy per prendere decisioni logiche sicure e riproducibili.
-
 ---
 
 ## 2. Guida all'Installazione e Avvio
@@ -38,8 +17,9 @@ Il sistema non si affida all'AI generativa, ma utilizza un layer semantico deter
 1. Estraggo la mia cartella di lavoro
 2. **Creo un Virtual Environment**
    ```bash
-   python -m venv venv
+    python -m venv venv
    .\venv\Scripts\activate
+    ```
 
 
 ### 2.3 Installo le dipendenze:
@@ -54,7 +34,6 @@ Eseguo il comando:
 uvicorn main:app --reload
 ```
 Il server sarà accessibile su: http://127.0.0.1:8000
-La documentazione Swagger è disponibile su: http://127.0.0.1:8000/docs
 
 ---
 
@@ -63,8 +42,7 @@ La documentazione Swagger è disponibile su: http://127.0.0.1:8000/docs
 * **Gerarchia e Fallback:** Se non esiste una regola specifica per il cliente, il sistema applica automaticamente una policy globale di sicurezza ("Safety First: REDACT").
 * **Tracciabilità (Audit Trail):** Ogni risposta include non solo il testo oscurato, ma anche la giustificazione tecnica (`justification`) e la fonte della policy applicata.
 * **Esecuzione Locale:** Funziona interamente offline utilizzando `ChromaDB` e `SentenceTransformers`.
-* **Ricostruzione Precisa:** Utilizza il *Reverse Index Slicing* per modificare il testo originale senza corrompere gli indici delle entità, garantendo precisione anche con parole ripetute.
-
+* **Ricostruzione Precisa**: Utilizza il Reverse Index Slicing per modificare il testo originale senza corrompere gli indici delle entità.
 ---
 
 ## 4. Dettagli Implementativi e Algoritmi
@@ -76,18 +54,20 @@ Il sistema non si limita a cercare la regola più simile, ma gestisce i conflitt
 Questo garantisce che le regole custom (es. ACME) abbiano sempre la precedenza, ma che esista sempre una rete di sicurezza (Safety Net).
 
 ### 4.2 Motore di Reasoning Deterministico
-Il `RedactionEngine` adotta un approccio deterministico:
-* **Analisi Semantica:** Il testo della policy viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA).
+Per evitare i rischi di "allucinazione" tipici degli LLM Generativi, il `RedactionEngine` adotta un approccio deterministico:
+* **Analisi Semantica:** Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA).
 * **Binding Dinamico:** La regola testuale viene tradotta immediatamente in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile e auditable.
 
 ### 4.3 Algoritmo di Ricostruzione "Safe Slicing"
-Per evitare errori comuni con `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
-Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**. Le sostituzioni vengono applicate partendo dalla fine del testo verso l'inizio. Questo approccio garantisce che gli indici restino validi durante l'intera operazione.
+La fase di modifica del testo è critica per l'integrità dei dati. Invece di usare metodi rischiosi come `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
+1.  Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**.
+2.  Si procede alla sostituzione partendo dal fondo della stringa verso l'inizio.
+*Perché?* Modificare la stringa all'inizio farebbe slittare tutti i caratteri successivi, invalidando gli indici delle altre entità. L'approccio inverso garantisce che ogni coordinata rimanga valida fino al momento del suo utilizzo.
 
-### 4.4 Testing Isolato
-Per garantire la stabilità senza dipendere dai dati vettoriali, la suite di test utilizza `unittest.mock`. Questo simula le risposte del database (es. "finge" di non trovare una policy per testare il Fallback), permettendo di validare la logica del codice (`logic.py`) in modo indipendente dalla qualità degli embedding.
-Per eseguire i test:
+### 4.4 Testing e CI/CD
+Il progetto include una suite di test basata su `unittest.mock`. I test simulano il Vector Store, permettendo di verificare la logica di business in isolamento.
 
+Per eseguire i tes: 
 ```bash
 python -m unittest discover tests
 ```
