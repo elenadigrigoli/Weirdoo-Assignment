@@ -105,3 +105,49 @@ def healthcheck():
         "service": "Dynamic Policy Guard",
         "version": "1.0.0"
     }
+    
+# --- SEZIONE BONUS ---
+
+# L'obiettivo è permettere agli auditor di capire le regole senza dover processare dati reali.
+
+class ExplainRequest(BaseModel):
+    """
+    Modello di input per la richiesta di spiegazione.
+    Richiede solo il contesto (chi è il cliente?) e il tipo di dato.
+    """
+    customer_id: str = Field(..., description="ID del cliente (es. BETA)")
+    entity_type: str = Field(..., description="Tipo di entità da verificare (es. EMAIL, PHONE)")
+
+class ExplainResponse(BaseModel):
+    """
+    Modello di output standardizzato.
+    Restituisce l'azione decisa, la fonte della policy e lo snippet di testo pertinente.
+    """
+    action: str
+    source: str
+    snippet: str
+    
+@app.post("/policy/explain", response_model=ExplainResponse, tags=["Debug"])
+def explain_policy_decision(request: ExplainRequest):
+    """
+    Spiega quale regola verrebbe applicata per un dato cliente e tipo di entità, senza eseguire la redazione effettiva.
+    (Utile per verificare la correttezza delle policy caricate nel Vector Store).
+    """
+    
+    # Invece di duplicare la logica di retrieval e reasoning, utilizziamo 
+    # lo stesso metodo 'process_entity' usato per la redazione vera e propria.
+    
+    # Il metodo process_entity richiede obbligatoriamente un 'original_value' per poter restituire il valore redatto. 
+    # # Qui passo un valore fittizio ("X") poiché a fini di debug ci interessa solo la decisione, non la trasformazione del valore.
+    decision = redaction_engine.process_entity(
+        customer_id=request.customer_id,
+        entity_type=request.entity_type,
+        original_value="X"  # Dummy value
+    )
+
+    # Convertiamo il dizionario interno restituito dal motore nel modello Pydantic di risposta.
+    return {
+        "action": decision["applied_action"],
+        "source": decision["policy_source"],
+        "snippet": decision["justification"]
+    }
