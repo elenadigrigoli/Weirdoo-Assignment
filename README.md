@@ -1,17 +1,17 @@
 # Policy-Aware PII Redaction Service (Dynamic Policy Guard)
 
 ## 1. **Dynamic Policy Guard** 
-E' un microservizio HTTP progettato per disaccoppiare la logica di business dalle regole di privacy (policy). Il sistema gestisce l'offuscamento di dati sensibili (PII) per clienti enterprise con requisiti conflittuali (es. una banca vuole hashare le email, un ospedale vuole oscurarle completamente).
+E' un microservizio HTTP progettato per disaccoppiare la logica di business dalle regole di privacy (policy). Il sistema gestisce l'offuscamento di dati sensibili (PII) per vari clienti, ad esempio una banca vuole hashare le email o un ospedale che vuole oscurarle completamente.
 
-Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale che recupera dinamicamente le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
+Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale che recupera le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
 
 ### 1.1 ChromaDB & Sentence Transformers
-Per soddisfare il requisito di esecuzione locale senza dipendenze da API esterne (OpenAI/Anthropic), ho implementato uno stack RAG leggero:
+Per soddisfare il requisito di esecuzione locale senza dipendenze da API esterne (OpenAI/Anthropic), ho implementato uno stack RAG :
 
 * **Vector Store: ChromaDB**
   * ChromaDB in modalità *in-memory/local*; non richiede container Docker pesanti per girare; permette di avere un DB vettoriale performante installando una semplice libreria Python.
 * **Embedding Model: `all-MiniLM-L6-v2`**
-  * Le policy di privacy sono frasi brevi e tecniche: `MiniLM-L6` è estremamente veloce su CPU, occupa poca RAM e offre una buona accuratezza semantica.
+  * `MiniLM-L6` è estremamente veloce su CPU, occupa poca RAM e offre una buona accuratezza semantica.
 
 ### 1.2 Strategy Pattern per l'Esecuzione
 Nel file `logic.py`, ho usato il **Design Pattern Strategy**.
@@ -35,16 +35,16 @@ Il sistema non si affida all'AI generativa, ma utilizza un layer semantico deter
 ### 2.2 Setup Ambiente
 1. Estraggo la mia cartella di lavoro.
 2. Creo un Virtual Environment:
-   ```bash
-    python -m venv venv
-   .\venv\Scripts\activate
-    ```
+```bash
+python -m venv venv
+.\venv\Scripts\activate
+```
 
 
 ### 2.3 Installo le dipendenze:
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install -r requirements.txt
+```
 Questo installerà FastAPI, Uvicorn, ChromaDB e Sentence-Transformers.
 
 ### 2.4 Avvio del Servizio
@@ -71,13 +71,13 @@ Il codice è organizzato in moduli distinti:
     * Esegue le query di ricerca semantica (Retrieval) per trovare la regola più adatta.
 
 * **`logic.py`** (Business Logic Layer)
-    * Contiene il cuore del sistema: la classe `RedactionEngine`.
+    * Contiene la classe `RedactionEngine`.
     * Implementa lo **Strategy Pattern**: mappa le regole testuali (es. "HASH") alle funzioni Python concrete.
     * Esegue il *Reasoning* (es. gestione delle eccezioni "ECCETTO") e applica le trasformazioni ai dati.
 
 * **`tests/`**
     * Contiene la parte riguardante test unitari che verificano il funzionamento del `RedactionEngine` in isolamento, usando `unittest.mock` per simulare il database.
-
+---
 ## 4. Funzionalità Chiave
 * **Context-Aware Retrieval:** Recupera la policy corretta basandosi sulla combinazione di Cliente (`customer_id`) e Tipo di Entità (`entity_type`).
 * **Gerarchia e Fallback:** Se non esiste una regola specifica per il cliente, il sistema applica automaticamente una policy globale di sicurezza ("Safety First: REDACT").
@@ -88,7 +88,7 @@ Il codice è organizzato in moduli distinti:
 
 ## 5. Dettagli Implementativi e Algoritmi
 
-### 5.1 Logica di Retrieval Gerarchico (Priority Retrieval)
+### 5.1 Logica di Retrieval Gerarchico 
 Il sistema non cerca solo la regola più simile, ma gestisce i conflitti tra clienti diversi implementando un meccanismo di ricerca a due livelli:
 1.  **Level 1 (Specifico):** Esegue una query sul Vector Store filtrando strettamente per `customer_id`.
 2.  **Level 2 (Fallback):** Se la ricerca specifica non produce risultati (o score troppo bassi), il sistema esegue una seconda query filtrando per `customer="GLOBAL"`.
@@ -96,13 +96,12 @@ Questo garantisce che le regole custom abbiano sempre la precedenza, ma che esis
 
 ### 5.2 Motore di Reasoning Deterministico
 Il `RedactionEngine` adotta un approccio deterministico:
- Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA). La regola testuale viene poi tradotta in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile.
+Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA). La regola testuale viene poi tradotta in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile.
 
 ### 5.3 Algoritmo di Ricostruzione 
 Invece di usare metodi rischiosi come `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
 1.  Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**.
-2.  Si procede alla sostituzione partendo dal fondo della stringa verso l'inizio.
-*Perché?* Modificare la stringa all'inizio farebbe slittare tutti i caratteri successivi, invalidando gli indici delle altre entità. L'approccio inverso garantisce che ogni coordinata rimanga valida fino al momento del suo utilizzo.
+2.  Procede alla sostituzione partendo dal fondo della stringa verso l'inizio --> modificare la stringa all'inizio farebbe slittare tutti i caratteri successivi, invalidando gli indici delle altre entità. L'approccio inverso garantisce che ogni coordinata rimanga valida fino al momento del suo utilizzo.
 
 ### 5.4 Testing 
 Il progetto include una sezione di test basata su `unittest.mock`. I test simulano il Vector Store, permettendo di verificare la logica di business in isolamento.
@@ -115,6 +114,7 @@ Output: Ran 4 tests in 0.003s OK
 
 L'output conferma non solo la correttezza della logica, ma anche l'efficacia del disaccoppiamento architetturale. Grazie all'uso dei Mock, i test non devono collegarsi a un vero database, rendendoli istantanei (0.003s). Possiamo quindi lanciare i test continuamente senza dover aspettare, garantendo che il software sia sempre funzionante.
 
+---
 ## 6. Esempi di Test e Risultati
 
 ### 6.1 Scenario 1: Cliente "ACME" (Policy Custom)
@@ -260,6 +260,7 @@ Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la mod
   "snippet": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
 }
 ```
+---
 
 ## 7. Limitazioni Note e Sviluppi Futuri
 
