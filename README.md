@@ -100,7 +100,8 @@ Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, E
 
 #### Request (Input)
 ```json
-{ "customer_id": "ACME",
+{
+"customer_id": "ACME",
   "policy_version": "v2",
   "content": {
     "text": "L'utente Mario Rossi (mario@acme.com) ha chiamato il 333-123456.",
