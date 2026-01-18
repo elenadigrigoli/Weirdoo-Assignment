@@ -3,7 +3,26 @@
 ## 1. **Dynamic Policy Guard** 
 E' un microservizio HTTP progettato per disaccoppiare la logica di business dalle regole di privacy (policy). Il sistema gestisce l'offuscamento di dati sensibili (PII) per clienti enterprise con requisiti conflittuali (es. una banca vuole hashare le email, un ospedale vuole oscurarle completamente).
 
-Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale. Recupera dinamicamente le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
+Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale che recupera dinamicamente le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
+
+### 1.1 ChromaDB & Sentence Transformers
+Per soddisfare il requisito di esecuzione locale senza dipendenze da API esterne (OpenAI/Anthropic), ho implementato uno stack RAG leggero:
+
+* **Vector Store: ChromaDB**
+  * ChromaDB in modalità *in-memory/local*; non richiede container Docker pesanti per girare; permette di avere un DB vettoriale performante installando una semplice libreria Python.
+* **Embedding Model: `all-MiniLM-L6-v2`**
+  * Le policy di privacy sono frasi brevi e tecniche: `MiniLM-L6` è estremamente veloce su CPU, occupa poca RAM e offre una buona accuratezza semantica.
+
+### 1.2 Strategy Pattern per l'Esecuzione
+Nel file `logic.py`, ho usato il **Design Pattern Strategy**.
+* Ho creato una mappa (`Dict[str, Callable]`) che collega le keyword delle policy (es. `"HASH"`, `"MASK_LAST_4"`) direttamente alle funzioni Python.
+
+### 1.3 Algoritmo di Ricostruzione del Testo
+Per applicare le modifiche al testo originale, il sistema utilizza una ricostruzione posizionale basata sugli indici delle entità, applicando le sostituzioni in ordine inverso per preservare la validità delle coordinate.
+
+### 1.4 Semantic Layer & Determinismo
+Il sistema non si affida all'AI generativa, ma utilizza un layer semantico deterministico:
+* Il `Retrieval` individua la regola più pertinente ed il codice analizza il testo della policy per prendere decisioni logiche sicure e riproducibili.
 
 ---
 
@@ -14,8 +33,8 @@ Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`
 * Pip (Python Package Installer)
 
 ### 2.2 Setup Ambiente
-1. Estraggo la mia cartella di lavoro
-2. **Creo un Virtual Environment**
+1. Estraggo la mia cartella di lavoro.
+2. Creo un Virtual Environment:
    ```bash
     python -m venv venv
    .\venv\Scripts\activate
@@ -26,7 +45,7 @@ Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`
     ```bash
     pip install -r requirements.txt
     ```
-Questo installerà FastAPI, Uvicorn, ChromaDB e Sentence-Transformers.*
+Questo installerà FastAPI, Uvicorn, ChromaDB e Sentence-Transformers.
 
 ### 2.4 Avvio del Servizio
 Eseguo il comando:
@@ -40,7 +59,7 @@ Il server sarà accessibile su: http://127.0.0.1:8000
 ## 3. Funzionalità Chiave
 * **Context-Aware Retrieval:** Recupera la policy corretta basandosi sulla combinazione di Cliente (`customer_id`) e Tipo di Entità (`entity_type`).
 * **Gerarchia e Fallback:** Se non esiste una regola specifica per il cliente, il sistema applica automaticamente una policy globale di sicurezza ("Safety First: REDACT").
-* **Tracciabilità (Audit Trail):** Ogni risposta include non solo il testo oscurato, ma anche la giustificazione tecnica (`justification`) e la fonte della policy applicata.
+* **Tracciabilità:** Ogni risposta include non solo il testo oscurato, ma anche la giustificazione tecnica (`justification`) e la fonte della policy applicata.
 * **Esecuzione Locale:** Funziona interamente offline utilizzando `ChromaDB` e `SentenceTransformers`.
 * **Ricostruzione Precisa**: Utilizza il Reverse Index Slicing per modificare il testo originale senza corrompere gli indici delle entità.
 ---
@@ -48,26 +67,25 @@ Il server sarà accessibile su: http://127.0.0.1:8000
 ## 4. Dettagli Implementativi e Algoritmi
 
 ### 4.1 Logica di Retrieval Gerarchico (Priority Retrieval)
-Il sistema non si limita a cercare la regola più simile, ma gestisce i conflitti tra clienti diversi implementando un meccanismo di ricerca a due livelli:
+Il sistema non cerca solo la regola più simile, ma gestisce i conflitti tra clienti diversi implementando un meccanismo di ricerca a due livelli:
 1.  **Level 1 (Specifico):** Esegue una query sul Vector Store filtrando strettamente per `customer_id`.
 2.  **Level 2 (Fallback):** Se la ricerca specifica non produce risultati (o score troppo bassi), il sistema esegue una seconda query filtrando per `customer="GLOBAL"`.
-Questo garantisce che le regole custom (es. ACME) abbiano sempre la precedenza, ma che esista sempre una rete di sicurezza (Safety Net).
+Questo garantisce che le regole custom abbiano sempre la precedenza, ma che esista sempre una rete di sicurezza.
 
 ### 4.2 Motore di Reasoning Deterministico
-Per evitare i rischi di "allucinazione" tipici degli LLM Generativi, il `RedactionEngine` adotta un approccio deterministico:
-* **Analisi Semantica:** Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA).
-* **Binding Dinamico:** La regola testuale viene tradotta immediatamente in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile e auditable.
+Il `RedactionEngine` adotta un approccio deterministico:
+ Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA). La regola testuale viene poi tradotta in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile.
 
-### 4.3 Algoritmo di Ricostruzione "Safe Slicing"
-La fase di modifica del testo è critica per l'integrità dei dati. Invece di usare metodi rischiosi come `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
+### 4.3 Algoritmo di Ricostruzione 
+Invece di usare metodi rischiosi come `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
 1.  Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**.
 2.  Si procede alla sostituzione partendo dal fondo della stringa verso l'inizio.
 *Perché?* Modificare la stringa all'inizio farebbe slittare tutti i caratteri successivi, invalidando gli indici delle altre entità. L'approccio inverso garantisce che ogni coordinata rimanga valida fino al momento del suo utilizzo.
 
-### 4.4 Testing e CI/CD
-Il progetto include una suite di test basata su `unittest.mock`. I test simulano il Vector Store, permettendo di verificare la logica di business in isolamento.
+### 4.4 Testing 
+Il progetto include una sezione di test basata su `unittest.mock`. I test simulano il Vector Store, permettendo di verificare la logica di business in isolamento.
 
-Per eseguire i tes: 
+Per eseguire i test: 
 ```bash
 python -m unittest discover tests
 ```
@@ -123,7 +141,7 @@ Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, E
 ```
 
 ### 5.2 Scenario 2: Cliente "BETA" (Policy Eccezioni)
-Regola: "Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP". Output: Nome e Email oscurati, Telefono in chiaro.
+Regola: Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP. Output: Nome e Email oscurati, Telefono in chiaro.
 #### Request (Input)
 ```json
 {
@@ -206,7 +224,6 @@ Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tu
 Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la modifica.
 
 ```json
-
 {
   "customer_id": "BETA",
   "entity_type": "EMAIL"
@@ -226,11 +243,11 @@ Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la mod
 Visto che questo è un esercizio tecnico, ho fatto alcune semplificazioni consapevoli per mantenere il progetto leggero:
 
 ### 6.1  **Le entità devono arrivare già pronte**
-Il sistema non legge il testo per cercare autonomamente "Mario Rossi" (non fa *Named Entity Recognition*). Si aspetta che qualcun altro lo abbia già fatto e gli passi gli indici esatti (`start` e `end`). Se gli passi indici sbagliati, l'offuscamento potrebbe "rompere" le parole.
+Il sistema non legge il testo per cercare autonomamente "Mario Rossi" . Si aspetta che qualcun altro lo abbia già fatto e gli passi gli indici esatti (`start` e `end`); se gli passi indici sbagliati, l'offuscamento potrebbe "rompere" le parole.
 
 ### 6.2  **Il database "dimentica" tutto al riavvio**
-Per evitare configurazioni complesse, il database vettoriale viene creato nella memoria RAM ogni volta che lanci il programma. In uno scenario diverso, lo salverei su disco (persistenza) per non dover ricaricare le regole ogni volta che si riavvia il server.
+Per evitare configurazioni complesse, il database vettoriale viene creato nella memoria RAM ogni volta che lanci il programma. In uno scenario diverso, lo salverei su disco per non dover ricaricare le regole ogni volta che si riavvia il server.
 
 ### 6.3 **Scalabilità**
-Attualmente il servizio è pensato per girare in locale e gestisce le richieste in modo semplice. Se dovessimo gestire il traffico reale di una banca con migliaia di utenti al secondo, bisognerebbe configurare un server più potente per parallelizzare il lavoro.
+Attualmente il servizio è pensato per girare in locale e gestisce le richieste in modo semplice. Se dovessimo gestire il traffico reale di una azienda con migliaia di utenti, bisognerebbe configurare un server più potente per parallelizzare il lavoro.
 
