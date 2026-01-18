@@ -56,7 +56,29 @@ Il server sarà accessibile su: http://127.0.0.1:8000
 
 ---
 
-## 3. Funzionalità Chiave
+## 3. Struttura del Progetto
+
+Il codice è organizzato in moduli distinti:
+
+* **`main.py`** (API Layer)
+    * È l'entry point dell'applicazione (FastAPI).
+    * Gestisce le richieste HTTP (`POST /redact`, `POST /policy/explain`).
+    * Definisce i modelli di validazione dati (Pydantic) per input e output.
+
+* **`database.py`** (Data Layer)
+    * Gestisce la connessione con il Vector Store (**ChromaDB**).
+    * Si occupa di creare gli embedding (tramite `sentence-transformers`) e di caricare le policy in memoria all'avvio.
+    * Esegue le query di ricerca semantica (Retrieval) per trovare la regola più adatta.
+
+* **`logic.py`** (Business Logic Layer)
+    * Contiene il cuore del sistema: la classe `RedactionEngine`.
+    * Implementa lo **Strategy Pattern**: mappa le regole testuali (es. "HASH") alle funzioni Python concrete.
+    * Esegue il *Reasoning* (es. gestione delle eccezioni "ECCETTO") e applica le trasformazioni ai dati.
+
+* **`tests/`**
+    * Contiene la parte riguardante test unitari che verificano il funzionamento del `RedactionEngine` in isolamento, usando `unittest.mock` per simulare il database.
+
+## 4. Funzionalità Chiave
 * **Context-Aware Retrieval:** Recupera la policy corretta basandosi sulla combinazione di Cliente (`customer_id`) e Tipo di Entità (`entity_type`).
 * **Gerarchia e Fallback:** Se non esiste una regola specifica per il cliente, il sistema applica automaticamente una policy globale di sicurezza ("Safety First: REDACT").
 * **Tracciabilità:** Ogni risposta include non solo il testo oscurato, ma anche la giustificazione tecnica (`justification`) e la fonte della policy applicata.
@@ -64,25 +86,25 @@ Il server sarà accessibile su: http://127.0.0.1:8000
 * **Ricostruzione Precisa**: Utilizza il Reverse Index Slicing per modificare il testo originale senza corrompere gli indici delle entità.
 ---
 
-## 4. Dettagli Implementativi e Algoritmi
+## 5. Dettagli Implementativi e Algoritmi
 
-### 4.1 Logica di Retrieval Gerarchico (Priority Retrieval)
+### 5.1 Logica di Retrieval Gerarchico (Priority Retrieval)
 Il sistema non cerca solo la regola più simile, ma gestisce i conflitti tra clienti diversi implementando un meccanismo di ricerca a due livelli:
 1.  **Level 1 (Specifico):** Esegue una query sul Vector Store filtrando strettamente per `customer_id`.
 2.  **Level 2 (Fallback):** Se la ricerca specifica non produce risultati (o score troppo bassi), il sistema esegue una seconda query filtrando per `customer="GLOBAL"`.
 Questo garantisce che le regole custom abbiano sempre la precedenza, ma che esista sempre una rete di sicurezza.
 
-### 4.2 Motore di Reasoning Deterministico
+### 5.2 Motore di Reasoning Deterministico
 Il `RedactionEngine` adotta un approccio deterministico:
  Il testo recuperato viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA). La regola testuale viene poi tradotta in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile.
 
-### 4.3 Algoritmo di Ricostruzione 
+### 5.3 Algoritmo di Ricostruzione 
 Invece di usare metodi rischiosi come `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
 1.  Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**.
 2.  Si procede alla sostituzione partendo dal fondo della stringa verso l'inizio.
 *Perché?* Modificare la stringa all'inizio farebbe slittare tutti i caratteri successivi, invalidando gli indici delle altre entità. L'approccio inverso garantisce che ogni coordinata rimanga valida fino al momento del suo utilizzo.
 
-### 4.4 Testing 
+### 5.4 Testing 
 Il progetto include una sezione di test basata su `unittest.mock`. I test simulano il Vector Store, permettendo di verificare la logica di business in isolamento.
 
 Per eseguire i test: 
@@ -93,9 +115,9 @@ Output: Ran 4 tests in 0.003s OK
 
 L'output conferma non solo la correttezza della logica, ma anche l'efficacia del disaccoppiamento architetturale. Grazie all'uso dei Mock, i test non devono collegarsi a un vero database, rendendoli istantanei (0.003s). Possiamo quindi lanciare i test continuamente senza dover aspettare, garantendo che il software sia sempre funzionante.
 
-## 5. Esempi di Test e Risultati
+## 6. Esempi di Test e Risultati
 
-### 5.1 Scenario 1: Cliente "ACME" (Policy Custom)
+### 6.1 Scenario 1: Cliente "ACME" (Policy Custom)
 Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, Email hashata, Telefono mascherato.
 
 #### Request (Input)
@@ -141,7 +163,7 @@ Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, E
 }
 ```
 
-### 5.2 Scenario 2: Cliente "BETA" (Policy Eccezioni)
+### 6.2 Scenario 2: Cliente "BETA" (Policy Eccezioni)
 Regola: Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP. Output: Nome e Email oscurati, Telefono in chiaro.
 #### Request (Input)
 ```json
@@ -185,7 +207,7 @@ Regola: Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP. Output
   ]
 }
 ```
-### 5.3 Scenario 3: Cliente Sconosciuto (Fallback Globale)
+### 6.3 Scenario 3: Cliente Sconosciuto (Fallback Globale)
 Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tutto oscurato ([REDACTED]) perché scatta la policy POL-GLOBAL.
 #### Request (Input)
 ```json
@@ -221,7 +243,7 @@ Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tu
   ]
 }
 ```
-### 5.4 Scenario 4: Endpoint Bonus 
+### 6.4 Scenario 4: Endpoint Bonus 
 Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la modifica.
 
 ```json
@@ -239,16 +261,16 @@ Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la mod
 }
 ```
 
-## 6. Limitazioni Note e Sviluppi Futuri
+## 7. Limitazioni Note e Sviluppi Futuri
 
 Visto che questo è un esercizio tecnico, ho fatto alcune semplificazioni consapevoli per mantenere il progetto leggero:
 
-### 6.1  **Le entità devono arrivare già pronte**
+### 7.1  **Le entità devono arrivare già pronte**
 Il sistema non legge il testo per cercare autonomamente "Mario Rossi" . Si aspetta che qualcun altro lo abbia già fatto e gli passi gli indici esatti (`start` e `end`); se gli passi indici sbagliati, l'offuscamento potrebbe "rompere" le parole.
 
-### 6.2  **Il database "dimentica" tutto al riavvio**
+### 7.2  **Il database "dimentica" tutto al riavvio**
 Per evitare configurazioni complesse, il database vettoriale viene creato nella memoria RAM ogni volta che lanci il programma. In uno scenario diverso, lo salverei su disco per non dover ricaricare le regole ogni volta che si riavvia il server.
 
-### 6.3 **Scalabilità**
+### 7.3 **Scalabilità**
 Attualmente il servizio è pensato per girare in locale e gestisce le richieste in modo semplice. Se dovessimo gestire il traffico reale di una azienda con migliaia di utenti, bisognerebbe configurare un server più potente per parallelizzare il lavoro.
 
