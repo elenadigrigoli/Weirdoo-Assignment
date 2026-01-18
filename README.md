@@ -1,12 +1,64 @@
 # Policy-Aware PII Redaction Service (Dynamic Policy Guard)
 
-**Dynamic Policy Guard** è un microservizio HTTP progettato per disaccoppiare la logica di business dalle regole di privacy (policy). Il sistema gestisce l'offuscamento di dati sensibili (PII) per clienti enterprise con requisiti conflittuali (es. una banca vuole hashare le email, un ospedale vuole oscurarle completamente).
+## 1. **Dynamic Policy Guard** 
+E' un microservizio HTTP progettato per disaccoppiare la logica di business dalle regole di privacy (policy). Il sistema gestisce l'offuscamento di dati sensibili (PII) per clienti enterprise con requisiti conflittuali (es. una banca vuole hashare le email, un ospedale vuole oscurarle completamente).
 
 Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`), il servizio implementa un'architettura **RAG (Retrieval-Augmented Generation)** locale. Recupera dinamicamente le regole da un Vector Store e le interpreta per decidere come trattare ogni singola entità, garantendo flessibilità e tracciabilità totale.
 
+### 1.1 ChromaDB & Sentence Transformers
+Per soddisfare il requisito di esecuzione locale senza dipendenze da API esterne (OpenAI/Anthropic), ho implementato uno stack RAG leggero:
+
+* **Vector Store: ChromaDB**
+  * ChromaDB in modalità *in-memory/local*; non richiede container Docker pesanti per girare; permette di avere un DB vettoriale performante installando una semplice libreria Python.
+* **Embedding Model: `all-MiniLM-L6-v2`**
+  * Le policy di privacy sono frasi brevi e tecniche: `MiniLM-L6` è estremamente veloce su CPU, occupa poca RAM e offre una buona accuratezza semantica.
+
+### 1.2 Strategy Pattern per l'Esecuzione
+Nel file `logic.py`, ho usato il **Design Pattern Strategy**.
+* Ho creato una mappa (`Dict[str, Callable]`) che collega le keyword delle policy (es. `"HASH"`, `"MASK_LAST_4"`) direttamente alle funzioni Python.
+* Rispetta l'**Open-Closed Principle**: se si richiede una nuova cifratura basterà aggiungere una funzione e una riga nel dizionario, senza toccare la logica di retrieval o l'API.
+
+### 1.3 Algoritmo di Ricostruzione del Testo
+Per applicare le modifiche al testo originale, il sistema utilizza una ricostruzione posizionale basata sugli indici delle entità, applicando le sostituzioni in ordine inverso per preservare la validità delle coordinate.
+
+### 1.4 Semantic Layer & Determinismo
+Il sistema non si affida all'AI generativa, ma utilizza un layer semantico deterministico:
+* Il `Retrieval` individua la regola più pertinente.
+* Il codice analizza il testo della policy per prendere decisioni logiche sicure e riproducibili.
+
 ---
 
-## Funzionalità Chiave
+## 2. Guida all'Installazione e Avvio
+
+### 2.1 Prerequisiti
+* Python 3.10 o superiore
+* Pip (Python Package Installer)
+
+### 2.2 Setup Ambiente
+1. Estraggo la mia cartella di lavoro
+2. **Creo un Virtual Environment**
+   ```bash
+   python -m venv venv
+   .\venv\Scripts\activate
+
+
+### 2.3 Installo le dipendenze:
+    ```bash
+    pip install -r requirements.txt
+    ```
+Questo installerà FastAPI, Uvicorn, ChromaDB e Sentence-Transformers.*
+
+### 2.4 Avvio del Servizio
+Eseguo il comando:
+```bash
+uvicorn main:app --reload
+```
+Il server sarà accessibile su: http://127.0.0.1:8000
+La documentazione Swagger è disponibile su: http://127.0.0.1:8000/docs
+
+---
+
+## 3. Funzionalità Chiave
 * **Context-Aware Retrieval:** Recupera la policy corretta basandosi sulla combinazione di Cliente (`customer_id`) e Tipo di Entità (`entity_type`).
 * **Gerarchia e Fallback:** Se non esiste una regola specifica per il cliente, il sistema applica automaticamente una policy globale di sicurezza ("Safety First: REDACT").
 * **Tracciabilità (Audit Trail):** Ogni risposta include non solo il testo oscurato, ma anche la giustificazione tecnica (`justification`) e la fonte della policy applicata.
@@ -15,63 +67,37 @@ Invece di utilizzare logiche condizionali hardcoded (es. `if customer == 'ACME'`
 
 ---
 
-## Architettura e Scelte Progettuali
+## 4. Dettagli Implementativi e Algoritmi
 
-### 1. Strategia RAG (Retrieval)
-Per gestire i conflitti tra regole specifiche e standard globali, ho implementato un meccanismo di **Priority Retrieval** a due livelli:
-1.  **Level 1 (Specifico):** Cerca nel Vector Store filtrando esattamente per `customer_id`.
-2.  **Level 2 (Fallback):** Se non trova risultati pertinenti, esegue una query per `customer="GLOBAL"`.
+### 4.1 Logica di Retrieval Gerarchico (Priority Retrieval)
+Il sistema non si limita a cercare la regola più simile, ma gestisce i conflitti tra clienti diversi implementando un meccanismo di ricerca a due livelli:
+1.  **Level 1 (Specifico):** Esegue una query sul Vector Store filtrando strettamente per `customer_id`.
+2.  **Level 2 (Fallback):** Se la ricerca specifica non produce risultati (o score troppo bassi), il sistema esegue una seconda query filtrando per `customer="GLOBAL"`.
+Questo garantisce che le regole custom (es. ACME) abbiano sempre la precedenza, ma che esista sempre una rete di sicurezza (Safety Net).
 
-**Stack Tecnologico:**
-* **ChromaDB:** Utilizzato in modalità in-memory per semplicità di deployment e velocità.
-* **Modello `all-MiniLM-L6-v2`:** veloce per inferenza su CPU e capace di comprendere semanticamente query come "Policy for PHONE".
+### 4.2 Motore di Reasoning Deterministico
+Il `RedactionEngine` adotta un approccio deterministico:
+* **Analisi Semantica:** Il testo della policy viene normalizzato e scansionato per keyword logiche (es. la clausola `"ECCETTO"` per gestire regole condizionali complesse come quella del cliente BETA).
+* **Binding Dinamico:** La regola testuale viene tradotta immediatamente in una funzione Python concreta tramite una mappa di strategie, garantendo che l'output sia sempre prevedibile e auditable.
 
-### 2. Logic Engine (Reasoning)
-Poiché il requisito vietava l'uso di LLM generativi pesanti, il `RedactionEngine` utilizza un approccio euristico basato su **Keyword Spotting** e **Strategy Pattern**:
-* Analizza il testo della policy (es. *"Tutto REDACT eccetto i PHONE..."*).
-* Mappa le intenzioni semantiche a funzioni Python concrete (`_apply_hash`, `_apply_mask`, ecc.).
+### 4.3 Algoritmo di Ricostruzione "Safe Slicing"
+Per evitare errori comuni con `str.replace()` (che potrebbe oscurare omonimie non desiderate nel testo), il sistema opera matematicamente sugli indici:
+Le entità vengono ordinate per posizione di partenza (`start_index`) in ordine **decrescente**. Le sostituzioni vengono applicate partendo dalla fine del testo verso l'inizio. Questo approccio garantisce che gli indici restino validi durante l'intera operazione.
 
-### 3. Text Reconstruction (Safe Slicing)
-Per evitare errori comuni con `str.replace()` (che rischia di sostituire omonimie non desiderate), il sistema ricostruisce il testo usando le coordinate `start` ed `end` fornite in input.
-Le sostituzioni vengono applicate in ordine **decrescente** (dalla fine della stringa all'inizio) per mantenere validi gli indici delle entità precedenti durante la manipolazione.
-
----
-
-## Installazione e Avvio
-
-### Prerequisiti
-* Python 3.10 o superiore
-* pip
-
-### 1. Setup dell'ambiente
-Uso virtual environment per isolare le dipendenze.
+### 4.4 Testing Isolato
+Per garantire la stabilità senza dipendere dai dati vettoriali, la suite di test utilizza `unittest.mock`. Questo simula le risposte del database (es. "finge" di non trovare una policy per testare il Fallback), permettendo di validare la logica del codice (`logic.py`) in modo indipendente dalla qualità degli embedding.
+Per eseguire i test:
 
 ```bash
-# Crea il virtual environment
-python -m venv venv
-
-# Attiva su Windows
-.\venv\Scripts\activate
-
-# Installa le librerie necessarie
-pip install -r requirements.txt
+python -m unittest discover tests
 ```
+Output: Ran 4 tests in 0.003s OK
 
-### 2. Avvio del Server
-L'applicazione utilizza FastAPI servita da Uvicorn.
+L'output conferma non solo la correttezza della logica, ma anche l'efficacia del disaccoppiamento architetturale. Grazie all'uso dei Mock, i test non devono collegarsi a un vero database, rendendoli istantanei (0.003s). Possiamo quindi lanciare i test continuamente senza dover aspettare, garantendo che il software sia sempre funzionante.
 
-```bash
+## 5. Esempi di Test e Risultati
 
-uvicorn main:app --reload
-```
-Il server sarà accessibile su: http://127.0.0.1:8000
-
-La documentazione Swagger è disponibile su: http://127.0.0.1:8000/docs
-
-All'avvio, il sistema caricherà automaticamente le policy dimostrative nel database.
-
-### 3. Esempi di Test e Risultati
-Scenario 1: Cliente "ACME" (Policy Custom)
+### 5.1 Scenario 1: Cliente "ACME" (Policy Custom)
 Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, Email hashata, Telefono mascherato.
 
 #### Request (Input)
@@ -91,38 +117,32 @@ Regola: Email -> HASH, Telefono -> MASK, Nome -> KEEP. Output: Nome in chiaro, E
 #### Output - Response Body
 ```json
 {
-  "original_text_length": 64,
-  "redacted_text": "L'utente Mario Rossi ([HASH:91b629c2...]) ha chiamato il ******3456.",
-  "actions": [
-    {
-      "entity_type": "NAME",
-      "original_value": "Mario Rossi",
-      "redacted_value": "Mario Rossi",
-      "applied_action": "KEEP",
-      "policy_source": "POL-ACME-V2",
-      "justification": "Matched snippet: 'I NAME (nomi propri) sono considerati pubblici nel nostro caso, quindi KEEP.'"
-    },
-    {
-      "entity_type": "EMAIL",
-      "original_value": "mario@acme.com",
-      "redacted_value": "[HASH:91b629c2...]",
-      "applied_action": "HASH",
-      "policy_source": "POL-ACME-V2",
-      "justification": "Matched snippet: 'Le EMAIL devono essere convertite usando HASH per permettere analisi anonime.'"
-    },
-    {
-      "entity_type": "PHONE",
-      "original_value": "333-123456",
-      "redacted_value": "******3456",
-      "applied_action": "MASK_LAST_4",
-      "policy_source": "POL-ACME-V2",
-      "justification": "Matched snippet: 'I numeri di PHONE devono essere parzialmente oscurati usando MASK_LAST_4 per verifica operatore.'"
-    }
-  ]
+  "original_text_length": 64,
+  "redacted_text": "L'utente Mario Rossi ([HASH:91b629c2...]) ha chiamato il ******3456.",
+  "actions": [
+    {
+      "entity_type": "NAME",
+      "applied_action": "KEEP",
+      "policy_source": "POL-ACME-V2",
+      "justification": "Matched snippet: 'I NAME (nomi propri) sono considerati pubblici nel nostro caso, quindi KEEP.'"
+    },
+    {
+      "entity_type": "EMAIL",
+      "applied_action": "HASH",
+      "policy_source": "POL-ACME-V2",
+      "justification": "Matched snippet: 'Le EMAIL devono essere convertite usando HASH per permettere analisi anonime.'"
+    },
+    {
+      "entity_type": "PHONE",
+      "applied_action": "MASK_LAST_4",
+      "policy_source": "POL-ACME-V2",
+      "justification": "Matched snippet: 'I numeri di PHONE devono essere parzialmente oscurati usando MASK_LAST_4 per verifica operatore.'"
+    }
+  ]
 }
 ```
 
-Scenario 2: Cliente "BETA" (Policy Eccezioni)
+### 5.2 Scenario 2: Cliente "BETA" (Policy Eccezioni)
 Regola: "Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP". Output: Nome e Email oscurati, Telefono in chiaro.
 #### Request (Input)
 ```json
@@ -142,37 +162,31 @@ Regola: "Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP". Outp
 #### Output - Response Body
 ``` json
 {
-  "original_text_length": 64,
-  "redacted_text": "L'utente [REDACTED] ([REDACTED]) ha chiamato il 333-123456.",
-  "actions": [
-    {
-      "entity_type": "NAME",
-      "original_value": "Mario Rossi",
-      "redacted_value": "[REDACTED]",
-      "applied_action": "REDACT",
-      "policy_source": "POL-BETA-GEN",
-      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
-    },
-    {
-      "entity_type": "EMAIL",
-      "original_value": "mario@beta.com",
-      "redacted_value": "[REDACTED]",
-      "applied_action": "REDACT",
-      "policy_source": "POL-BETA-GEN",
-      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
-    },
-    {
-      "entity_type": "PHONE",
-      "original_value": "333-123456",
-      "redacted_value": "333-123456",
-      "applied_action": "KEEP",
-      "policy_source": "POL-BETA-GEN",
-      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
-    }
-  ]
+  "original_text_length": 64,
+  "redacted_text": "L'utente [REDACTED] ([REDACTED]) ha chiamato il 333-123456.",
+  "actions": [
+    {
+      "entity_type": "NAME",
+      "applied_action": "REDACT",
+      "policy_source": "POL-BETA-GEN",
+      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
+    },
+    {
+      "entity_type": "EMAIL",
+      "applied_action": "REDACT",
+      "policy_source": "POL-BETA-GEN",
+      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
+    },
+    {
+      "entity_type": "PHONE",
+      "applied_action": "KEEP",
+      "policy_source": "POL-BETA-GEN",
+      "justification": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
+    }
+  ]
 }
 ```
-Scenario 3: Cliente Sconosciuto (Fallback Globale)
+### 5.3 Scenario 3: Cliente Sconosciuto (Fallback Globale)
 Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tutto oscurato ([REDACTED]) perché scatta la policy POL-GLOBAL.
 #### Request (Input)
 ```json
@@ -190,33 +204,53 @@ Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tu
 #### Output - Response Body
 ``` json
 {
-  "original_text_length": 43,
-  "redacted_text": "Il CEO [REDACTED] ([REDACTED]) è qui.",
-  "actions": [
-    {
-      "entity_type": "NAME",
-      "original_value": "Luigi Bianchi",
-      "redacted_value": "[REDACTED]",
-      "applied_action": "REDACT",
-      "policy_source": "POL-GLOBAL",
-      "justification": "Matched snippet: 'Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo: REDACT.'"
-    },
-    {
-      "entity_type": "EMAIL",
-      "original_value": "ceo@pippo.com",
-      "redacted_value": "[REDACTED]",
-      "applied_action": "REDACT",
-      "policy_source": "POL-GLOBAL",
-      "justification": "Matched snippet: 'Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo: REDACT.'"
-    }
-  ]
+  "original_text_length": 43,
+  "redacted_text": "Il CEO [REDACTED] ([REDACTED]) è qui.",
+  "actions": [
+    {
+      "entity_type": "NAME",
+      "applied_action": "REDACT",
+      "policy_source": "POL-GLOBAL",
+      "justification": "Matched snippet: 'Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo: REDACT.'"
+    },
+    {
+      "entity_type": "EMAIL",
+      "applied_action": "REDACT",
+      "policy_source": "POL-GLOBAL",
+      "justification": "Matched snippet: 'Se non viene trovata alcuna regola specifica per il cliente, applicare lo standard di sicurezza massimo: REDACT.'"
+    }
+  ]
 }
 ```
-### Struttura del Progetto
-main.py: Entry point dell'API FastAPI.
+### 5.4 Scenario 4: Endpoint Bonus 
+Obiettivo: Debugging/Audit. Capire cosa farebbe il sistema senza eseguire la modifica.
 
-logic.py: Logica di business e Strategy Pattern.
+```json
 
-database.py: Gestione ChromaDB e Retrieval RAG.
+{
+  "customer_id": "BETA",
+  "entity_type": "EMAIL"
+}
+```
+#### Output - Response Body
+``` json
+{
+  "action": "REDACT",
+  "source": "POL-BETA-GEN",
+  "snippet": "Matched snippet: 'Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP per esigenze di contatto urgenti.'"
+}
+```
 
-requirements.txt: Dipendenze Python. adesso mi riscrivi tutto il read me che attualmente è cosi come ti ho incollato aggiungendo tutta questa altra cosa che abbiamo fatto piu le limitazioni
+## 6. Limitazioni Note e Sviluppi Futuri
+
+Visto che questo è un esercizio tecnico, ho fatto alcune semplificazioni consapevoli per mantenere il progetto leggero:
+
+### 6.1  **Le entità devono arrivare già pronte**
+Il sistema non legge il testo per cercare autonomamente "Mario Rossi" (non fa *Named Entity Recognition*). Si aspetta che qualcun altro lo abbia già fatto e gli passi gli indici esatti (`start` e `end`). Se gli passi indici sbagliati, l'offuscamento potrebbe "rompere" le parole.
+
+### 6.2  **Il database "dimentica" tutto al riavvio**
+Per evitare configurazioni complesse, il database vettoriale viene creato nella memoria RAM ogni volta che lanci il programma. In uno scenario diverso, lo salverei su disco (persistenza) per non dover ricaricare le regole ogni volta che si riavvia il server.
+
+### 6.3 **Scalabilità**
+Attualmente il servizio è pensato per girare in locale e gestisce le richieste in modo semplice. Se dovessimo gestire il traffico reale di una banca con migliaia di utenti al secondo, bisognerebbe configurare un server più potente per parallelizzare il lavoro.
+
