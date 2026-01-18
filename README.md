@@ -168,14 +168,14 @@ Regola: Tutto deve essere REDACT, eccetto i PHONE che devono essere KEEP. Output
 #### Request (Input)
 ```json
 {
-  "customer_id": "BETA",
-  "policy_version": "gen",
-  "content": {
-     "text": "L'utente Mario Rossi (mario@beta.com) ha chiamato il 333-123456.",
-     "entities": [
-      { "type": "NAME", "value": "Mario Rossi", "start": 9, "end": 20 },
-      { "type": "EMAIL", "value": "mario@beta.com", "start": 22, "end": 36 },
-      { "type": "PHONE", "value": "333-123456", "start": 53, "end": 63 }
+ "customer_id": "BETA",
+ "policy_version": "gen",
+ "content": {
+    "text": "L'utente Mario Rossi (mario@beta.com) ha chiamato il 333-123456.",
+    "entities": [
+       { "type": "NAME", "value": "Mario Rossi", "start": 9, "end": 20 },
+       { "type": "EMAIL", "value": "mario@beta.com", "start": 22, "end": 36 },
+       { "type": "PHONE", "value": "333-123456", "start": 53, "end": 63 }
     ]
   }
 }
@@ -212,12 +212,12 @@ Regola: Nessuna regola specifica trovata -> Applica standard massimo. Output: Tu
 #### Request (Input)
 ```json
 {
-  "customer_id": "PIPPO_CORP",
-  "content": {
+  "customer_id": "PIPPO_CORP",
+  "content": {
      "text": "Il CEO Luigi Bianchi (ceo@pippo.com) è qui.",
-     "entities": [
-      { "type": "NAME", "value": "Luigi Bianchi", "start": 7, "end": 20 },
-      { "type": "EMAIL", "value": "ceo@pippo.com", "start": 22, "end": 35 }
+     "entities": [
+       { "type": "NAME", "value": "Luigi Bianchi", "start": 7, "end": 20 },
+       { "type": "EMAIL", "value": "ceo@pippo.com", "start": 22, "end": 35 }
     ]
   }
 }
